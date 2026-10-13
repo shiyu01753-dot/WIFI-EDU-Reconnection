@@ -558,7 +558,7 @@ namespace CampusReconnect {
             if (tray == null) return;
             trayStatus.Text = "状态：" + text;
             tray.Text = text.Length > 60 ? text.Substring(0, 60) : text;
-            tray.Icon = state == "blocked" ? SystemIcons.Warning : state == "online" ? SystemIcons.Information : Icon;
+            tray.Icon = Icon;
         }
         void ArmTimer() {
             dueTimer.Stop();
