@@ -1,0 +1,89 @@
+{
+  "provenance": "Synthetic protocol vectors using documentation-only IP addresses; no real credentials.",
+  "vectors": [
+    {
+      "username": "test-user",
+      "password": "test-password",
+      "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ip": "192.0.2.1",
+      "acid": "1",
+      "expected": {
+        "action": "login",
+        "username": "test-user",
+        "password": "{MD5}1640d493b1d386c8e55033f4c87da91f",
+        "ac_id": "1",
+        "ip": "192.0.2.1",
+        "chksum": "273572d63c4b738857c81e441b02f97066a9f356",
+        "info": "{SRBX1}oVMG4KtpbWtFvQabB+GDc+/gU4kmxKk6nYZCep7cXKA5OSPKry47HLVchkoJswfkUvPv34vRmrkbC7/VDQ8SJvp1VyhW/0LuNN1tAmDcI3ML4zf4bIuOqIBgK9CeQAEgfxivZZcSiKL=",
+        "n": 200,
+        "type": 1,
+        "os": "Windows 10",
+        "name": "Windows",
+        "double_stack": 0
+      }
+    },
+    {
+      "username": "test-user",
+      "password": "a\"b\\c",
+      "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ip": "192.0.2.1",
+      "acid": "1",
+      "expected": {
+        "action": "login",
+        "username": "test-user",
+        "password": "{MD5}692f58e2bdd6680da4eb1dd04bd8d756",
+        "ac_id": "1",
+        "ip": "192.0.2.1",
+        "chksum": "b272b044577a03d7f79d15b139772bad306e7c77",
+        "info": "{SRBX1}YDRFJbJOc3H425uRDYCyImSwRgi7AMFaX/qlzkZJ7Xz5zmi9ZlcfHAyS11mK5UvSOj9ik4/Q2NZkkb0pxjxne36jIXXq9s5aI6KOIviaUOgdXUVTNPTUnar/OZ7vyE7hfUr8Rv==",
+        "n": 200,
+        "type": 1,
+        "os": "Windows 10",
+        "name": "Windows",
+        "double_stack": 0
+      }
+    },
+    {
+      "username": "test-user",
+      "password": "测试密码ABC123",
+      "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ip": "192.0.2.1",
+      "acid": "1",
+      "expected": {
+        "action": "login",
+        "username": "test-user",
+        "password": "{MD5}bbfb99222e84b56bb9e769e88f85220c",
+        "ac_id": "1",
+        "ip": "192.0.2.1",
+        "chksum": "464b345e70de312bd3442b116237bc9e2f1fd17a",
+        "info": "{SRBX1}LQZJ3d0MSw3JWnmEqUxw6aAp0pIbtxs7fJ7RJjW33G+mRdZH2Z9C6SCPP9Ac3qFpJ41EtxCKvezF4sOEudsXK7IQ7WRjC/d8EAQgz9QbDKvg+zry4aQOb3QeIdCoI7Wy5+i4m2va3QS=",
+        "n": 200,
+        "type": 1,
+        "os": "Windows 10",
+        "name": "Windows",
+        "double_stack": 0
+      }
+    },
+    {
+      "username": "test-user",
+      "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ip": "192.0.2.1",
+      "acid": "1",
+      "expected": {
+        "action": "login",
+        "username": "test-user",
+        "password": "{MD5}8db6b389ebcf86a4f7b193d119cfd546",
+        "ac_id": "1",
+        "ip": "192.0.2.1",
+        "chksum": "419454d28bc649ba571177797f303f37810eeaf5",
+        "info": "{SRBX1}abo/gRHrs2+Okwp1SfZOprVlgvOatlRSLvmJA0YHiHHzJR5hVgx2cFdOEuVlhdj66LhiPRyKprNhAaOYlFZHxrDSz9rQM9bGi6Di+Lfm5HwZOAtqKZp2zgEbSUI2lHwLvBl5c5zmCJAz1GfQ9FAOpjk4YwiA1cCZ1ONpQEjkpaOFYx1jqBIwYLFmsJ0/bl6vv+Dm5XumFI4RXr2yhKRGlvSHSqA3TIB6VeV7iBaTx65w+mzPq6jmCYVNj9qhBEpquWGp+dZffJcZDSPtKTT3Fb2lxKJOJiKWHh2q3GU3dDHhVMJbSytqfnM2srsyANcePhdEpS==",
+        "n": 200,
+        "type": 1,
+        "os": "Windows 10",
+        "name": "Windows",
+        "double_stack": 0
+      }
+    }
+  ]
+}
