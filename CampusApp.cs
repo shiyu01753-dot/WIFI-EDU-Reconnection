@@ -63,6 +63,7 @@ namespace CampusReconnect {
                         if (form.DefaultInterval != 21600000) throw new Exception("Interval check failed");
                         form.VerifyAccounts();
                         form.VerifyModes();
+                        form.VerifyChannels();
                         form.VerifyNetworkConfiguration();
                         form.VerifyWakeRecovery();
                         form.ShowInTaskbar = false; form.StartPosition = FormStartPosition.Manual;
@@ -109,7 +110,9 @@ namespace CampusReconnect {
         string editingId = "";
         bool loadingAccounts;
         readonly CheckBox startup = new CheckBox();
+        readonly CheckBox managed = new CheckBox();
         readonly ComboBox mode = new ComboBox();
+        readonly ComboBox channel = new ComboBox();
         readonly Label status = new Label(), schedule = new Label();
         readonly System.Windows.Forms.Timer dueTimer = new System.Windows.Forms.Timer();
         readonly System.Windows.Forms.Timer progressTimer = new System.Windows.Forms.Timer();
@@ -133,7 +136,7 @@ namespace CampusReconnect {
         public bool PowerNotificationsRegistered { get { return powerRegistration != IntPtr.Zero; } }
         public bool IsCleanFirstStart {
             get { return accounts.Count == 0 && user.Text.Length == 0 && password.Text.Length == 0 &&
-                !active && !startup.Checked && mode.SelectedIndex == 0 && Get("portalUrl", "") == "" &&
+                !active && !startup.Checked && !managed.Checked && mode.SelectedIndex == 0 && Get("portalUrl", "") == "" &&
                 Get("acId", "") == "" && wifi.Text == ""; }
         }
         string ConfigFile { get { return Path.Combine(dataDir, "config.json"); } }
@@ -194,6 +197,16 @@ namespace CampusReconnect {
             reveal.CheckedChanged += delegate { password.UseSystemPasswordChar = !reveal.Checked; }; Controls.Add(reveal);
             AddLabel("Wi-Fi", 32, 325, 76); AddBox(wifi, 116, 322);
             wifi.Text = Get("wifiProfile", "");
+            wifi.Width = 188;
+            channel.Location = new Point(314, 322); channel.Size = new Size(134, 28);
+            channel.DropDownStyle = ComboBoxStyle.DropDownList; channel.Items.AddRange(new object[] { "无线", "有线" });
+            channel.SelectedIndex = Get("channel", "wireless") == "wired" ? 1 : 0;
+            wifi.Enabled = channel.SelectedIndex == 0; Controls.Add(channel);
+            channel.SelectedIndexChanged += delegate {
+                wifi.Enabled = channel.SelectedIndex == 0;
+                active = false; wakeRecovery = false; StopOwnedWorker(); ArmTimer();
+                SetStatus("渠道已修改，请保存并启用", "idle");
+            };
             Button networkButton = new Button { Text = "网络配置", Location = new Point(368, 74), Size = new Size(92, 30) };
             StyleButton(networkButton, false); networkButton.Click += delegate { OpenNetworkConfiguration(); }; Controls.Add(networkButton);
             Button detectButton = new Button { Text = "一键配置", Location = new Point(276, 74), Size = new Size(84, 30) };
@@ -209,8 +222,23 @@ namespace CampusReconnect {
             mode.SelectedIndex = Get("mode", "light") == "standby" ? 1 : Get("mode", "light") == "night" ? 2 : 0;
             Controls.Add(mode);
             startup.Text = "开机自动启动";
-            startup.Location = new Point(32, 395); startup.Size = new Size(416, 26);
+            startup.Location = new Point(32, 395); startup.Size = new Size(200, 26);
             startup.Checked = !testing && File.Exists(StartupFile); Controls.Add(startup);
+            managed.Text = "托管模式"; managed.Location = new Point(270, 395); managed.Size = new Size(178, 26);
+            managed.Checked = Get("managed", "False").Equals("True", StringComparison.OrdinalIgnoreCase);
+            Controls.Add(managed); UpdateModeDisplay(DateTime.Now);
+            managed.CheckedChanged += delegate {
+                settings["managed"] = managed.Checked;
+                UpdateModeDisplay(DateTime.Now);
+                if (!testMode) Persist();
+                ArmTimer();
+            };
+            mode.SelectedIndexChanged += delegate {
+                if (managed.Checked) return;
+                settings["mode"] = mode.SelectedIndex == 1 ? "standby" : mode.SelectedIndex == 2 ? "night" : "light";
+                if (!testMode) Persist();
+                ArmTimer();
+            };
             status.Location = new Point(32, 437); status.Size = new Size(416, 24); status.AutoEllipsis = true;
             status.Font = new Font(Font.FontFamily, 9.5f, FontStyle.Bold);
             status.Text = "尚未启用"; Controls.Add(status);
@@ -219,6 +247,9 @@ namespace CampusReconnect {
             AddButton("保存并启用", 20, delegate { SaveAndEnable(); });
             AddButton("立即检测", 208, delegate { CheckNow(); });
             AddButton("暂停", 348, delegate { Pause(); });
+            Button reconnectButton = new Button { Text = "断线重连", Location = new Point(314, 430), Size = new Size(134, 30) };
+            StyleButton(reconnectButton, false); reconnectButton.Click += delegate { ManualReconnect(); }; Controls.Add(reconnectButton);
+            status.Width = 274;
             foreach (Control control in Controls) {
                 if (control is Label || control is CheckBox) control.BackColor = Color.Transparent;
             }
@@ -226,7 +257,10 @@ namespace CampusReconnect {
             LoadAccounts();
             accountBox.SelectedIndexChanged += delegate { SelectAccount(); };
             RefreshAccounts(Get("defaultAccountId_" + SchoolId, Get("defaultAccountId", Get("selectedAccountId", ""))));
-            dueTimer.Tick += delegate { CheckNow(); };
+            dueTimer.Tick += delegate {
+                if (managed.Checked && DateTime.Now < nextCheck) ArmTimer(true);
+                else CheckNow();
+            };
             progressTimer.Interval = 1000; progressTimer.Tick += delegate { ReadProgress(); };
             wakeTimer.Tick += delegate {
                 wakeTimer.Stop();
@@ -308,7 +342,7 @@ namespace CampusReconnect {
             if (WorkerRunning()) { MessageBox.Show("请等待当前检测结束后修改网络配置。", Text); return; }
             using (NetworkSettingsDialog dialog = new NetworkSettingsDialog(Convert.ToString(schoolBox.SelectedItem),
                 Get("portalUrl", ""), Get("acId", ""), wifi.Text, Get("engine", "srun"),
-                Get("formLoginPath", ""), Get("formUsernameField", ""), Get("formPasswordField", ""), Get("formSuccessMarker", ""), Get("wifiSsid", ""))) {
+                Get("formLoginPath", ""), Get("formUsernameField", ""), Get("formPasswordField", ""), Get("formSuccessMarker", ""), Get("wifiSsid", ""), channel.SelectedIndex == 1)) {
                 if (discover) dialog.Shown += delegate { dialog.StartDiscovery(true); };
                 if (dialog.ShowDialog(this) == DialogResult.OK) {
                     settings["engine"] = dialog.Engine; settings["formLoginPath"] = dialog.FormPath;
@@ -357,10 +391,26 @@ namespace CampusReconnect {
                 if (dueTimer.Interval != new int[] { 21600000, 14400000, 7200000 }[i]) throw new Exception("Detection mode interval failed");
             }
             settings["mode"] = "light";
+            DateTime day = new DateTime(2026, 1, 1);
+            foreach (int hour in new int[] { 0, 5, 6, 17, 18, 23 }) {
+                string expected = hour < 6 ? "night" : hour < 18 ? "light" : "standby";
+                if (ManagedMode(day.AddHours(hour)) != expected || NextModeBoundary(day.AddHours(hour)) <= day.AddHours(hour))
+                    throw new Exception("Managed mode boundary failed");
+            }
+            managed.Checked = true;
+            if (mode.Enabled || !managed.Checked) throw new Exception("Managed checkbox failed");
+            managed.Checked = false;
+            if (!mode.Enabled || Get("mode", "") != "light") throw new Exception("Manual mode restoration failed");
             active = false; ArmTimer();
             foreach (Control control in Controls) {
                 if (control.Right > ClientSize.Width || control.Bottom > ClientSize.Height) throw new Exception("Control outside window: " + control.Text);
             }
+        }
+        public void VerifyChannels() {
+            active = true; channel.SelectedIndex = 1;
+            if (wifi.Enabled || active) throw new Exception("Wired channel selection failed");
+            channel.SelectedIndex = 0;
+            if (!wifi.Enabled || active) throw new Exception("Wireless channel selection failed");
         }
         public void VerifyAccounts() {
             accounts.Clear();
@@ -457,7 +507,7 @@ namespace CampusReconnect {
                 e.Graphics.FillRectangle(state, 20 * scale, 431 * scale, 440 * scale, 51 * scale);
             }
         }
-        void ShowSettings() { Show(); WindowState = FormWindowState.Normal; Activate(); }
+        void ShowSettings() { UpdateModeDisplay(DateTime.Now); Show(); WindowState = FormWindowState.Normal; Activate(); }
         protected override void OnHandleCreated(EventArgs e) {
             base.OnHandleCreated(e);
             powerRegistration = RegisterSuspendResumeNotification(Handle, 0);
@@ -542,6 +592,7 @@ namespace CampusReconnect {
             trayDue = new ToolStripMenuItem("下次检测：尚未安排"); trayDue.Enabled = false; menu.Items.Add(trayDue);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("立即检测", null, delegate { CheckNow(); });
+            menu.Items.Add("断线重连", null, delegate { ManualReconnect(); });
             menu.Items.Add("打开设置", null, delegate { ShowSettings(); });
             menu.Items.Add("暂停自动检测", null, delegate { Pause(); });
             menu.Items.Add("查看运行记录", null, delegate {
@@ -560,11 +611,26 @@ namespace CampusReconnect {
             tray.Text = text.Length > 60 ? text.Substring(0, 60) : text;
             tray.Icon = Icon;
         }
-        void ArmTimer() {
+        static string ManagedMode(DateTime now) { return now.Hour < 6 ? "night" : now.Hour < 18 ? "light" : "standby"; }
+        static DateTime NextModeBoundary(DateTime now) {
+            return now.Hour < 6 ? now.Date.AddHours(6) : now.Hour < 18 ? now.Date.AddHours(18) : now.Date.AddDays(1);
+        }
+        static int ModeInterval(string value) { return value == "standby" ? 14400000 : value == "night" ? 7200000 : 21600000; }
+        void UpdateModeDisplay(DateTime now) {
+            string current = managed.Checked ? ManagedMode(now) : Get("mode", "light");
+            mode.Enabled = !managed.Checked;
+            mode.SelectedIndex = current == "standby" ? 1 : current == "night" ? 2 : 0;
+        }
+        void ArmTimer(bool keepDue = false) {
             dueTimer.Stop();
+            DateTime now = DateTime.Now;
+            UpdateModeDisplay(now);
             if (!active) { schedule.Text = "自动检测已暂停。"; if (trayDue != null) trayDue.Text = "下次检测：已暂停"; return; }
-            dueTimer.Interval = Get("mode", "light") == "standby" ? 14400000 : Get("mode", "light") == "night" ? 7200000 : DefaultInterval;
-            nextCheck = DateTime.Now.AddMilliseconds(dueTimer.Interval);
+            int interval = ModeInterval(managed.Checked ? ManagedMode(now) : Get("mode", "light"));
+            DateTime candidate = now.AddMilliseconds(interval);
+            nextCheck = keepDue && nextCheck < candidate ? nextCheck : candidate;
+            DateTime timerDue = managed.Checked && NextModeBoundary(now) < nextCheck ? NextModeBoundary(now) : nextCheck;
+            dueTimer.Interval = Math.Max(1, (int)(timerDue - now).TotalMilliseconds);
             schedule.Text = "下次检测：" + nextCheck.ToString("MM-dd HH:mm") + "（电脑本地时间）";
             if (trayDue != null) trayDue.Text = schedule.Text;
             dueTimer.Start();
@@ -572,10 +638,12 @@ namespace CampusReconnect {
         void SaveAndEnable() {
             try {
                 if (WorkerRunning()) throw new Exception("当前正在检测，请等待完成后再保存。");
+                settings["channel"] = channel.SelectedIndex == 1 ? "wired" : "wireless";
+                settings["bindingRevision"] = Guid.NewGuid().ToString("N");
                 if (wifi.Text.Trim() != Get("wifiProfile", "")) settings["wifiSsid"] = "";
-                settings["mode"] = mode.SelectedIndex == 1 ? "standby" : mode.SelectedIndex == 2 ? "night" : "light";
+                if (!managed.Checked) settings["mode"] = mode.SelectedIndex == 1 ? "standby" : mode.SelectedIndex == 2 ? "night" : "light";
                 if (Get("engine", "srun") == "system") {
-                    if (wifi.Text.Trim() == "") throw new Exception("系统网络恢复需要填写已保存的 Wi-Fi 名称。");
+                    if (channel.SelectedIndex == 0 && wifi.Text.Trim() == "") throw new Exception("请填写已保存的 Wi-Fi 名称。");
                     settings["wifiProfile"] = wifi.Text.Trim(); settings["enabled"] = true;
                     Persist(); SetStartup(startup.Checked); active = true; ArmTimer(); SetStatus("已启用，后台待机", "idle"); return;
                 }
@@ -594,7 +662,7 @@ namespace CampusReconnect {
                 settings["username"] = user.Text.Trim(); settings["passwordCipher"] = cipher;
                 settings["schoolId"] = SchoolId;
                 settings["wifiProfile"] = wifi.Text.Trim(); settings["wifiProfile_" + SchoolId] = wifi.Text.Trim();
-                settings["mode"] = mode.SelectedIndex == 1 ? "standby" : mode.SelectedIndex == 2 ? "night" : "light";
+                if (!managed.Checked) settings["mode"] = mode.SelectedIndex == 1 ? "standby" : mode.SelectedIndex == 2 ? "night" : "light";
                 settings["enabled"] = true;
                 Persist();
                 SetStartup(startup.Checked);
@@ -618,8 +686,17 @@ namespace CampusReconnect {
         bool WorkerRunning() {
             try { return worker != null && !worker.HasExited; } catch { return false; }
         }
-        void CheckNow() {
+        void ManualReconnect() {
             if (WorkerRunning()) return;
+            if (Get("channel", "wireless") != "wired" && Get("wifiProfile", "") == "") { MessageBox.Show("请先保存校园 Wi-Fi 名称，再使用断线重连。", Text); return; }
+            wakeRecovery = false;
+            CheckNow(true);
+        }
+        void CheckNow(bool forceReconnect = false) {
+            if (WorkerRunning()) return;
+            if (Get("channel", "wireless") != (channel.SelectedIndex == 1 ? "wired" : "wireless")) {
+                MessageBox.Show("请先保存当前选择的连接渠道。", Text); return;
+            }
             wakeTimer.Stop();
             if (Get("engine", "srun") != "system" && accountBox.SelectedIndex < 0) {
                 wakeRecovery = false; ArmTimer(); ShowSettings(); MessageBox.Show("请先保存当前账号。", Text); return;
@@ -643,11 +720,11 @@ namespace CampusReconnect {
                 string nodeFile = Path.Combine(appDir, "runtime", "node.exe");
                 if (!File.Exists(nodeFile)) nodeFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "node.exe");
                 if (!File.Exists(nodeFile)) nodeFile = "node.exe";
-                ProcessStartInfo start = new ProcessStartInfo(nodeFile, "\"" + Path.Combine(appDir, "reconnect.cjs") + "\" \"" + dataDir + "\"");
+                ProcessStartInfo start = new ProcessStartInfo(nodeFile, "\"" + Path.Combine(appDir, "reconnect.cjs") + "\" \"" + dataDir + "\"" + (forceReconnect ? " --reconnect" : ""));
                 start.UseShellExecute = false; start.CreateNoWindow = true; start.WindowStyle = ProcessWindowStyle.Hidden;
                 worker = Process.Start(start); progressTimer.Start(); lastWorkerState = "waiting";
                 if (wakeRecovery) wakeAttempts++;
-                SetStatus("正在检测网络……", "checking");
+                SetStatus(forceReconnect ? "正在断线重连……" : "正在检测网络……", "checking");
                 ArmTimer();
             } catch (Exception ex) {
                 wakeRecovery = false; ArmTimer(); SetStatus("检测未启动", "blocked");
@@ -695,6 +772,7 @@ namespace CampusReconnect {
         }
     }
     sealed class NetworkSettingsDialog : Form {
+        readonly bool wiredChannel;
         readonly TextBox portal = new TextBox(), acid = new TextBox(), wifi = new TextBox(), profileName = new TextBox();
         readonly Panel formFields = new Panel();
         readonly TextBox formPath = new TextBox(), formUser = new TextBox(), formPassword = new TextBox(), formMarker = new TextBox();
@@ -730,7 +808,8 @@ namespace CampusReconnect {
             System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(uri.Query, @"(?:^|[?&])ac_id=(\d{1,6})(?:&|$)");
             return match.Success ? match.Groups[1].Value : "";
         }
-        public NetworkSettingsDialog(string name, string address, string id, string wifiName, string engineId = "unknown", string postPath = "", string userKey = "", string passwordKey = "", string successMarker = "", string ssid = "") {
+        public NetworkSettingsDialog(string name, string address, string id, string wifiName, string engineId = "unknown", string postPath = "", string userKey = "", string passwordKey = "", string successMarker = "", string ssid = "", bool wired = false) {
+            wiredChannel = wired;
             observedWifiName = wifiName; observedWifiSsid = ssid;
             Text = "网络配置"; AutoScaleMode = AutoScaleMode.Dpi; AutoScaleDimensions = new SizeF(96, 96);
             ClientSize = new Size(440, 330); Font = new Font("Microsoft YaHei UI", 9.5f); BackColor = Color.White;
@@ -747,6 +826,7 @@ namespace CampusReconnect {
             AddField("认证编号", acid, 174); acid.Text = id;
             AddHint("留空自动获取", 202);
             AddField("Wi-Fi 名称", wifi, 234); wifi.Text = wifiName;
+            wifi.Enabled = !wiredChannel;
             AddHint("有线连接可留空", 263);
             formFields.Location = new Point(20, 292); formFields.Size = new Size(400, 124);
             AddFormField("提交路径", formPath, 0); formPath.Text = postPath;
@@ -799,7 +879,7 @@ namespace CampusReconnect {
             string appDir = AppDomain.CurrentDomain.BaseDirectory;
             string node = Path.Combine(appDir, "runtime", "node.exe");
             if (!File.Exists(node)) node = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "node.exe");
-            ProcessStartInfo info = new ProcessStartInfo(node, "\"" + Path.Combine(appDir, "discovery.cjs") + "\" --stdin");
+            ProcessStartInfo info = new ProcessStartInfo(node, "\"" + Path.Combine(appDir, "discovery.cjs") + "\" --stdin" + (wiredChannel ? " --wired" : " --wireless"));
             info.UseShellExecute = false; info.CreateNoWindow = true; info.RedirectStandardOutput = true; info.RedirectStandardError = true;
             info.RedirectStandardInput = true;
             info.StandardOutputEncoding = Encoding.UTF8; info.StandardErrorEncoding = Encoding.UTF8;
@@ -810,7 +890,7 @@ namespace CampusReconnect {
                     process.StandardInput.BaseStream.Write(inputBytes, 0, inputBytes.Length); process.StandardInput.Close();
                 }
                 try {
-                    if (!process.WaitForExit(35000)) { process.Kill(); process.WaitForExit(2000); throw new Exception("Discovery timeout"); }
+                    if (!process.WaitForExit(60000)) { process.Kill(); process.WaitForExit(2000); throw new Exception("Discovery timeout"); }
                     string output = process.StandardOutput.ReadToEnd();
                     if (output.Length > 16384 || process.ExitCode != 0) throw new Exception("Discovery response invalid");
                     return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(output);
@@ -844,7 +924,7 @@ namespace CampusReconnect {
                 Engine = detectedEngine; Portal = Engine == "system" ? "" : NormalizePortal(portal.Text);
                 AcId = acid.Text.Trim(); if (AcId == "") AcId = ExtractAcId(portal.Text);
                 if (AcId != "" && !System.Text.RegularExpressions.Regex.IsMatch(AcId, @"^\d{1,6}$")) throw new Exception("认证编号只接受 1 至 6 位数字，也可留空。");
-                Wifi = wifi.Text.Trim(); if (Engine == "system" && Wifi == "") throw new Exception("请填写已保存的 Wi-Fi 名称。");
+                Wifi = wifi.Text.Trim(); if (Engine == "system" && Wifi == "" && !wiredChannel) throw new Exception("请填写已保存的 Wi-Fi 名称。");
                 WifiSsid = Wifi == observedWifiName ? observedWifiSsid : "";
                 FormPath = formPath.Text.Trim(); FormUserField = formUser.Text.Trim(); FormPasswordField = formPassword.Text.Trim(); FormSuccessMarker = formMarker.Text;
                 if (Engine == "form") {

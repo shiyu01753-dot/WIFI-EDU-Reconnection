@@ -105,7 +105,10 @@ async function main(){
     input='';process.stdin.setEncoding('utf8');
     for await(const chunk of process.stdin){input+=chunk;if(input.length>8192)throw Error('Input too long');}
   }
-  return discoverNetwork(input);
+  const {createChannel}=require('./channel.cjs');
+  const wired=process.argv.includes('--wired');
+  const channel=await createChannel({channel:wired?'wired':'wireless',portalUrl:input?cleanUrl(input).origin:''},null,request);
+  return discoverNetwork(input,{request:channel.request,wifiState:wired?async()=>({known:false}):wifiState});
 }
 if(require.main===module)main().then(result=>process.stdout.write(JSON.stringify(result))).catch(()=>{
   process.stdout.write(JSON.stringify({recognized:false,engine:'unknown',message:'无法读取认证页面，请检查网络或网址'}));

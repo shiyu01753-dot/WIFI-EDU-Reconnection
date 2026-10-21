@@ -9,6 +9,7 @@ bin/
 obj/
 config.json
 accounts.json
+channel-binding.json
 *.cipher.json
 *.log
 *.har

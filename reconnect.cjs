@@ -71,7 +71,8 @@ function parseJsonp(body) {
 function request(url, timeout = 7000, options = {}) {
   return new Promise((resolve, reject) => {
     const transport = url.startsWith('https:') ? https : http;
-    const req = transport.request(url, { method: options.method || 'GET', headers: { 'User-Agent': 'CampusReconnect/1.0', 'Cache-Control': 'no-cache', ...options.headers } }, res => {
+    const req = transport.request(url, { localAddress:options.localAddress, family:options.family, lookup:options.lookup, agent:options.agent,
+      method: options.method || 'GET', headers: { 'User-Agent': 'CampusReconnect/1.0', 'Cache-Control': 'no-cache', ...options.headers } }, res => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', chunk => {
@@ -88,9 +89,9 @@ function request(url, timeout = 7000, options = {}) {
   });
 }
 
-async function api(endpoint, params = {}, portal) {
+async function api(endpoint, params = {}, portal, fetch = request) {
   const query = new URLSearchParams({ ...params, callback: 'campusCallback', _: String(Date.now()) });
-  const r = await request(portal + endpoint + '?' + query);
+  const r = await fetch(portal + endpoint + '?' + query);
   if (r.status !== 200) throw new Error('认证服务器暂时不可用');
   return parseJsonp(r.body);
 }
@@ -120,13 +121,13 @@ async function discoverAcId(profile, fetch = request) {
   throw new Error('无法确认认证参数，请检查网络配置');
 }
 
-async function internet() {
+async function internet(fetch = request) {
   const checks = [
     ['http://www.msftconnecttest.com/connecttest.txt', r => r.status === 200 && r.body.trim() === 'Microsoft Connect Test'],
     ['https://www.baidu.com/', r => r.status === 200 && /baidu/i.test(r.body)]
   ];
   const results = await Promise.all(checks.map(async ([u, valid]) => {
-    try { return valid(await request(u, 5000)); } catch { return false; }
+    try { return valid(await fetch(u, 5000)); } catch { return false; }
   }));
   return results.some(Boolean);
 }
@@ -135,12 +136,15 @@ async function wifiState() {
   const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); netsh wlan show interfaces'],
   { windowsHide: true, timeout: 10000, encoding: 'utf8' });
+  const interfaces = stdout.match(/^\s*(?:Name|名称)\s*:/gim) || [];
+  if (interfaces.length > 1) return { known: false };
+  const interfaceName = stdout.match(/^\s*(?:Name|名称)\s*:\s*(.+)\r?$/im)?.[1]?.trim() || '';
   const ssid = stdout.match(/^\s*SSID\s*:\s*(.+)\r?$/m)?.[1]?.trim();
   const profile = stdout.match(/^\s*(?:Profile|配置文件)\s*:\s*(.+)\r?$/im)?.[1]?.trim() || '';
   const disconnected = /(?:State|状态)\s*:\s*(?:disconnected|已断开连接|断开连接)/i.test(stdout);
   const authentication = stdout.match(/^\s*(?:Authentication|身份验证|验证)\s*:\s*(.+)\r?$/im)?.[1]?.trim() || '';
   const enterprise = /WPA(?:2|3)?[\s-]*(?:Enterprise|企业)|802\.1X/i.test(authentication);
-  return { ssid, profile, disconnected, known: Boolean(ssid || disconnected), enterprise };
+  return { ssid, profile, disconnected, known: Boolean(ssid || disconnected), enterprise, interfaceName };
 }
 
 async function connectWifi(profile) {
@@ -170,9 +174,9 @@ async function tick(config, password, write, deps = {}) {
   const online = deps.internet || internet, portalApi = deps.api || ((endpoint, params) => api(endpoint, params, profile.portal));
   const wifi = deps.wifiState || wifiState, connect = deps.connectWifi || connectWifi;
   const wait = deps.sleep || sleep;
-  if (await online()) { write('网络正常，继续监测', 'online'); return 30000; }
+  if (!config.forceAuthentication && await online()) { write('网络正常，继续监测', 'online'); return 30000; }
   await wait(3000);
-  if (await online()) { write('短暂网络波动已恢复', 'online'); return 30000; }
+  if (!config.forceAuthentication && await online()) { write('短暂网络波动已恢复', 'online'); return 30000; }
   if (config.wifiProfile) {
     let w;
     try { w = await wifi(); } catch { w = { known: false }; }
@@ -243,7 +247,7 @@ async function restoreLink(config, write, deps = {}) {
   return true;
 }
 async function systemTick(config, password, write, deps = {}) {
-  if (!config.wifiProfile) { write('系统网络恢复需要填写已保存的 Wi-Fi 名称', 'blocked'); return -1; }
+  if (!config.wifiProfile && config.channel !== 'wired') { write('系统网络恢复需要填写已保存的 Wi-Fi 名称', 'blocked'); return -1; }
   if (!await restoreLink(config, write, deps)) return 60000;
   const online = await (deps.internet || internet)();
   write(online ? '网络已恢复' : '网络已连接，可能需要手动认证', online ? 'online' : 'waiting');
@@ -284,6 +288,69 @@ async function runEngine(config, password, write, deps = {}) {
   return ENGINES[id](config,password,write,deps);
 }
 
+async function manualReconnect(config, password, write, deps = {}) {
+  if (!config.wifiProfile) { write('请先保存校园 Wi-Fi 名称', 'waiting'); return; }
+  const wifi = deps.wifiState || wifiState, wait = deps.sleep || sleep;
+  const state = await wifi();
+  const expected = config.wifiSsid || config.wifiProfile;
+  if (!state.known || !state.interfaceName || (state.ssid && state.ssid !== expected)) {
+    write('未确认指定 Wi-Fi，请先连接校园网络再重试', 'waiting'); return;
+  }
+  if (state.ssid) {
+    write('正在断开校园 Wi-Fi', 'connecting');
+    await (deps.disconnectWifi || (name => run('netsh.exe', ['wlan', 'disconnect', 'interface=' + name],
+      {windowsHide:true,timeout:10000})))(state.interfaceName);
+    await wait(1500);
+  }
+  write('正在重新连接校园 Wi-Fi', 'connecting');
+  await (deps.connectWifi || ((profile, name) => run('netsh.exe', ['wlan', 'connect', 'name=' + profile, 'interface=' + name],
+    {windowsHide:true,timeout:10000})))(config.wifiProfile, state.interfaceName);
+  await wait(8000);
+  const restored = await wifi();
+  if (restored.ssid !== expected || restored.interfaceName !== state.interfaceName) {
+    write('尚未连上指定 Wi-Fi，请检查网络后重试', 'waiting'); return;
+  }
+  return (deps.executeEngine || runEngine)(config, password, write, deps);
+}
+
+async function selectedChannel(config,password,write,directory,force=false,deps={}) {
+  const wired=config.channel==='wired';
+  const selected={...config,wifiProfile:wired?'':config.wifiProfile};
+  const prepare=async()=>{
+    const {createChannel}=require('./channel.cjs');
+    const channel=await (deps.createChannel||createChannel)(selected,directory,request);
+    const fetch=channel.request;
+    const bound={...deps,request:fetch,internet:()=>internet(fetch),
+      api:async(endpoint,params)=>{
+        const result=await api(endpoint,params,networkProfile(selected).portal,fetch);
+        if(endpoint==='/cgi-bin/get_challenge'&&result.client_ip!==channel.binding.address)throw Error('Client address mismatch');
+        return result;
+      },
+      discoverAcId:profile=>discoverAcId(profile,fetch)};
+    if(wired&&force) {
+      if((selected.engine||'srun')!=='srun') { write('此认证方式无法安全注销；请使用立即检测', 'waiting');return; }
+      const status=await bound.api('/cgi-bin/rad_user_info');
+      if(isOnline(status)) {
+        if(status.user_name!==selected.username) {write('当前认证账号与保存的账号不同，已取消重连','waiting');return;}
+        const acid=await bound.discoverAcId(networkProfile(selected));
+        const result=await bound.api('/cgi-bin/srun_portal',{action:'logout',username:selected.username,ac_id:acid,ip:channel.binding.address});
+        if(!isOnline(result)){write('未确认断线成功，已取消重连','waiting');return;}
+        await (deps.sleep||sleep)(1500);
+      } else if(!isOffline(status)){write('无法确认认证状态，已取消重连','waiting');return;}
+      selected.forceAuthentication=true;
+    }
+    return runEngine(selected,password,write,bound);
+  };
+  try {
+    if(!wired) {
+      if(!selected.wifiProfile){write('请先保存校园 Wi-Fi 名称','waiting');return;}
+      if(force)return await manualReconnect(selected,password,write,{...deps,executeEngine:prepare});
+      if(!await restoreLink(selected,write,deps))return;
+    }
+    return await prepare();
+  } catch {write('所选网络不可用或已变化，请检查连接和配置后重试','waiting');}
+}
+
 async function main() {
   if (process.argv.includes('--diagnose')) {
     console.log('请通过本机配置窗口和立即检测进行诊断');
@@ -322,12 +389,14 @@ async function main() {
     // One detection only. The native tray app owns the selected hourly timer, so Node
     // does not stay resident or wake every second while the app is idle.
     if (!fs.existsSync(stopFile)) {
-      try { await runEngine(config, password, write); }
+      try {
+        await selectedChannel(config,password,write,directory,process.argv.includes('--reconnect'));
+      }
       catch { write('网络通信失败，等待下一次检测或手动重试', 'waiting'); }
     }
   } catch {
     write('启动失败，请重新保存配置；加密密码只能由保存它的 Windows 用户使用', 'blocked');
   }
 }
-module.exports = { xEncode, loginParams, parseJsonp, tick, isOnline, isOffline, networkProfile, parseAcId, discoverAcId, runEngine, request, wifiState };
+module.exports = { xEncode, loginParams, parseJsonp, tick, isOnline, isOffline, networkProfile, parseAcId, discoverAcId, runEngine, request, wifiState, manualReconnect, selectedChannel };
 if (require.main === module) main().catch(() => { console.error('本地工具启动失败'); process.exitCode = 1; });

@@ -52,13 +52,13 @@ async function verify(){
     assert.equal(local.engine,'srun');assert.equal(local.acId,'18');assert.equal(actualRequests,2);
     const {stdout}=await require('node:util').promisify(require('node:child_process').execFile)(process.execPath,
       [require('node:path').join(__dirname,'../discovery.cjs'),'http://127.0.0.1:'+server.address().port+'/start'],{windowsHide:true,timeout:35000});
-    const cli=JSON.parse(stdout);assert.equal(cli.engine,'srun');assert.equal(cli.acId,'18');assert.equal(actualRequests,4);
+    const cli=JSON.parse(stdout);assert.equal(cli.recognized,false);assert.equal(actualRequests,2,'CLI discovery must not bypass channel validation for loopback');
     const pipe=await new Promise((resolve,reject)=>{
       const child=require('node:child_process').execFile(process.execPath,[require('node:path').join(__dirname,'../discovery.cjs'),'--stdin'],
         {windowsHide:true,timeout:35000},(error,output)=>{if(error)reject(error);else{try{resolve(JSON.parse(output));}catch(error){reject(error);}}});
       child.stdin.end('http://127.0.0.1:'+server.address().port+'/start?password=synthetic');
     });
-    assert.equal(pipe.engine,'srun');assert.equal(pipe.acId,'18');assert.equal(actualRequests,6);
+    assert.equal(pipe.recognized,false);assert.equal(actualRequests,2,'stdin discovery must fail closed when channel cannot be confirmed');
   }finally{await new Promise(resolve=>server.close(resolve));}
   console.log('PASS: automatic discovery, redirects, script fingerprints, anonymous status, field mapping, enterprise Wi-Fi, already-online boundary, captcha/CSRF/cross-host form rejection, loop limits, credential stripping, real GET transport');
 }

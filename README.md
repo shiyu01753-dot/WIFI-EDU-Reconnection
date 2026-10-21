@@ -9,6 +9,9 @@
 - **一键配置**：读取当前 Wi-Fi 和认证跳转页面，填写能确认的网络参数。
 - **网址识别**：粘贴认证网址后自动判断处理方式，无需选择引擎。
 - **定时检查**：提供 6、4、2 小时三个检测间隔，也可随时立即检测。
+- **托管模式**：勾选后自动切换检测模式，取消后恢复手动选择。
+- **断线重连**：手动重新连接已保存的校园 Wi-Fi，并按需认证。
+- **连接渠道**：选择有线或无线，检测与认证绑定所选渠道；无法确认连接时停止操作。
 - **唤醒检查**：休眠恢复后等待网络就绪，再进行有限次数的检查。
 - **账号管理**：保存多组账号，编辑、切换和设置默认账号，密码在本机加密保存。
 - **后台运行**：关闭窗口后留在托盘，可暂停或退出，开机启动由用户选择。
@@ -58,6 +61,8 @@ Windows 10/11 x64，.NET Framework 4.8 与 Windows PowerShell；运行包附带 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-app.ps1
 node .\tests\verify.cjs
 node .\tests\discovery.cjs
+node .\tests\manual-reconnect.cjs
+node .\tests\channel.cjs
 Start-Process .\CampusReconnect.exe -ArgumentList '--self-test', "$PWD\native-check.txt" -Wait
 Get-Content .\native-check.txt
 ```
@@ -67,6 +72,7 @@ Get-Content .\native-check.txt
 - `CampusApp.cs`：主界面、网络配置窗口、账号、托盘与调度。
 - `reconnect.cjs`：引擎注册、配置校验、网络恢复和认证请求。
 - `discovery.cjs`：Wi-Fi 与认证入口发现、只读协议识别和字段提取。
+- `channel.cjs`、`network-channel.ps1`：有线/无线网卡识别、来源绑定与路由校验。
 - `decrypt.ps1`：当前用户的 DPAPI 解密。
 - `tests/`：合成参数向量、模拟恢复与本机 HTTP 测试。
 - `app.config`、`app.manifest`：高 DPI 与 Windows 显示配置。
